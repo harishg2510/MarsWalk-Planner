@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MarsWalk Planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{color-scheme:dark;--bg:#14100e;--pn:#1e1815;--ln:#3a2e28;--tx:#efe3d8;--mu:#a3917f;--ac:#ff8a4c;--cy:#5fe0e8;--ok:#7fd48a;--sim:#e8c35f;--bad:#ff5a4d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 Georgia,serif}
+h1,h2,button,select,summary,.mono{font-family:"Trebuchet MS","Gill Sans",Verdana,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--ln)}
+h1{margin:0;font-size:19px}h1 small{display:block;font:12px Georgia,serif;color:var(--mu)}h2{font-size:13px;margin:0 0 8px;color:var(--ac)}
+#strip{padding:6px 16px;font-size:12px;color:var(--mu);border-bottom:1px solid var(--ln)}
+#err{background:#4a1612;color:#ffd9d4;padding:10px 16px;font-size:13px}#err code{background:#0006;padding:1px 5px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 400px;height:calc(100vh - 92px);min-height:560px}
+@media(max-width:980px){main{grid-template-columns:1fr;height:auto}#map{height:62vh}}
+#map{background:#1a1210;min-height:420px}aside{overflow:auto;padding:12px;border-left:1px solid var(--ln)}
+.pn{background:var(--pn);border:1px solid var(--ln);border-radius:6px;padding:12px;margin-bottom:10px}
+button,select{background:#2b211c;color:var(--tx);border:1px solid var(--ln);border-radius:4px;padding:6px 10px;font-size:13px;cursor:pointer}
+button:hover{border-color:var(--ac)}button.on{background:var(--ac);color:#1a0e06;border-color:var(--ac)}
+:focus-visible{outline:2px solid var(--cy)}
+.bd{display:inline-block;font:11px "Trebuchet MS",sans-serif;padding:1px 7px;border-radius:9px;border:1px solid}
+.v{color:var(--ok);border-color:var(--ok)}.s{color:var(--sim);border-color:var(--sim)}.p{color:var(--mu);border-color:var(--mu)}
+.lr{display:grid;grid-template-columns:20px 1fr 80px;gap:8px;align-items:center;margin:6px 0;font-size:13px}.lr small{display:block;color:var(--mu);font-size:11px}
+input[type=range]{width:100%;accent-color:var(--ac)}
+.mt{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.mt div{background:#120d0b;padding:6px 8px;border-radius:4px}.mt b{display:block;font-size:15px}.mt span{color:var(--mu);font-size:12px}
+.sm{font-size:12px;color:var(--mu)}#wl button{margin:0 4px 4px 0}
+.wp{width:26px;height:26px;border-radius:50%;background:#1a0e06;border:2px solid #fff;color:#fff;font:bold 12px sans-serif;display:flex;align-items:center;justify-content:center}.wp.sel{background:var(--ac);color:#1a0e06}
+summary{cursor:pointer;color:var(--ac);font-weight:bold;font-size:13px}table{width:100%;border-collapse:collapse;font-size:12px}td{padding:4px;border-top:1px solid var(--ln);vertical-align:top}
+a{color:var(--cy)}
+</style></head><body>
+<header>
+<h1><span data-i="title">MarsWalk Planner</span><small data-i="sub"></small></h1>
+<div><span id="api" class="bd p">API …</span> <button id="lang" aria-label="Switch language">தமிழ்</button></div>
+</header>
+<div id="strip" class="mono"><span class="bd v">Real</span> NASA Mars Trek tiles, site and waypoint coordinates, ground-truth sites, environment baselines · <span class="bd s">Simulated</span> slope, cost, radiation, geology proxy, routes, O₂ · <span class="bd p">Planned</span> real DEM, USGS geology tiles · Concept demonstrator, not a flight safety system.</div>
+<div id="err" hidden></div>
+<main>
+<div id="map" role="application" aria-label="Mars surface map"></div>
+<aside>
+<section class="pn"><h2 data-i="mission"></h2>
+<select id="site" aria-label="Mission"></select> <button id="fit" data-i="fit"></button> <button id="whole" data-i="whole"></button>
+<p id="mTitle" style="margin:8px 0 2px"></p><p id="mObj" class="sm" style="margin:0"></p></section>
+<section class="pn"><h2 data-i="layers"></h2><div id="lrows"></div><p class="sm" data-i="simwarn"></p>
+<p class="sm"><i style="background:#5c8e96" class="sw"></i> fan deposits · <i style="background:#c4a06e" class="sw"></i> plains · <i style="background:#966e82" class="sw"></i> volcanic · <i style="background:#785a46" class="sw"></i> highlands · <i style="background:#1e0012;border:1px solid #888" class="sw"></i> slope above 15°, impassable</p></section>
+<section class="pn"><h2 data-i="route"></h2><button id="hz"></button><div id="msg" class="sm" style="color:var(--bad);margin-top:4px"></div>
+<div class="mt" id="mt"></div>
+<canvas id="prof" width="360" height="90" style="width:100%;margin-top:8px;background:#120d0b;border-radius:4px" aria-label="Route elevation profile"></canvas></section>
+<section class="pn"><h2 data-i="insp"></h2><div id="wl"></div><div id="wd"></div></section>
+<section class="pn"><h2 data-i="env"></h2><div id="env"></div></section>
+<details class="pn"><summary data-i="prov"></summary><table>
+<tr><td><span class="bd v">Real</span></td><td>Viking MDIM 2.1 and MOLA tiles from NASA Mars Trek; landing and ground-truth coordinates (NSSDCA); mission waypoints and baselines from the team data file; the 15° suit slope limit.</td></tr>
+<tr><td><span class="bd s">Simulated</span></td><td>Elevation grid, slope, hazard cost, radiation proxy, geology proxy, routes, O₂ burn, dose and walk-back margin. They come from the Python pipeline running on a generated terrain and do not match the real ground.</td></tr>
+<tr><td><span class="bd p">Planned</span></td><td>Real DEM from Mars Trek, USGS geologic tiles, validation against Perseverance's traverse.</td></tr></table></details>
+</aside></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const API=location.protocol==="file:"?"http://localhost:8000":"";
+const $=id=>document.getElementById(id),cl=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const T={en:{title:"MarsWalk Planner",sub:"NASA Space Apps 2026 · Interplanetary Survival Guide: Martian Map",mission:"Mission",layers:"Data layers",route:"EVA route",hazard:"Simulate hazard avoidance",reset:"Back to nominal route",insp:"Waypoint inspector",env:"Surface environment",prov:"Data provenance",whole:"Whole Mars",fit:"Zoom to site",dist:"Distance",time:"Time",o2:"Suit O₂ used (model)",dose:"EVA dose (model)",slope:"Max slope on route",wb:"Worst walk-back margin",obj:"Objective",simwarn:"Layers tagged SIM come from a simulated terrain and do not match the real ground underneath.",rr:"Rerouted around hazard",nopath:"No safe reroute exists around this hazard.",sites:"Landing and candidate sites"},
+ta:{title:"செவ்வாய் நடை திட்டமிடுபவர்",sub:"நாசா ஸ்பேஸ் ஆப்ஸ் 2026 · செவ்வாய் வரைபடம்",mission:"பணி",layers:"தரவு அடுக்குகள்",route:"EVA பாதை",hazard:"ஆபத்து தவிர்ப்பு உருவகம்",reset:"நிலையான பாதைக்குத் திரும்பு",insp:"குறிப்புப் புள்ளி ஆய்வு",env:"மேற்பரப்பு சூழல்",prov:"தரவு மூலம்",whole:"முழு செவ்வாய்",fit:"தளத்திற்கு அணுகு",dist:"தூரம்",time:"நேரம்",o2:"பயன்படுத்திய ஆக்சிஜன் (மாதிரி)",dose:"கதிர்வீச்சு அளவு (மாதிரி)",slope:"பாதையில் அதிகபட்ச சாய்வு",wb:"திரும்பும் பாதுகாப்பு இருப்பு",obj:"நோக்கம்",simwarn:"SIM எனக் குறிக்கப்பட்ட அடுக்குகள் உருவகத் தரவு; உண்மையான நிலத்துடன் பொருந்தாது.",rr:"ஆபத்தைத் தவிர்த்து மாற்றப்பட்டது",nopath:"இந்த ஆபத்தைச் சுற்றி பாதுகாப்பான பாதை இல்லை.",sites:"தரையிறங்கிய மற்றும் வேட்பாளர் தளங்கள்"}};
+let LG="en";const t=k=>T[LG][k]||T.en[k]||k;
+let M,map,P,mis,hz=false,sel=0,layers={},routeGroup,wpGroup,hzCircle,sitesGroup;
+const RAMP=[[40,60,150],[40,150,170],[120,180,90],[220,190,90],[200,90,60],[250,240,230]];
+const mix=(a,b,u)=>a.map((c,i)=>c+(b[i]-c)*u);
+function ramp(u){u=cl(u)*5;const i=Math.min(4,Math.floor(u));return mix(RAMP[i],RAMP[i+1],u-i)}
+function paint(grid,fn){const R=grid.length,C=grid[0].length,c=document.createElement("canvas");c.width=C;c.height=R;const g=c.getContext("2d"),im=g.createImageData(C,R);
+for(let y=0;y<R;y++)for(let x=0;x<C;x++){const p=fn(y,x),o=(y*C+x)*4;im.data[o]=p[0];im.data[o+1]=p[1];im.data[o+2]=p[2];im.data[o+3]=p[3]??255}
+g.putImageData(im,0,0);return c.toDataURL()}
+function overlays(P){const E=P.layers.elevation,R=E.length,C=E[0].length,res=P.grid.res_m;let lo=1e9,hi=-1e9;E.forEach(r=>r.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v)}));
+const e=(y,x)=>E[cl(y,0,R-1)][cl(x,0,C-1)],en=(y,x)=>(E[y][x]-lo)/(hi-lo||1);
+const shade=(y,x)=>{const dx=(e(y,x+1)-e(y,x-1))/(2*res),dy=(e(y+1,x)-e(y-1,x))/(2*res);return cl((.55*dx+.55*dy+.63)/Math.hypot(dx,dy,1)/.63,.2,1.6)};
+const relief=paint(E,(y,x)=>ramp(en(y,x)*.95).map(v=>v*(.35+.65*shade(y,x)*.8)));
+const geo=paint(E,(y,x)=>{const v=en(y,x),c=v<.3?[92,142,150]:v<.55?[196,160,110]:v<.8?[150,110,130]:[120,90,70];return c.map(k=>k*(.5+.5*shade(y,x)*.8))});
+const cost=paint(P.layers.cost,(y,x)=>{const c=P.layers.cost[y][x];if(c==null)return[30,0,18,235];const u=cl(c/9.4);return[...(u<.5?mix([40,200,90],[250,220,60],u*2):mix([250,220,60],[240,50,40],(u-.5)*2)),170]});
+const rad=paint(P.layers.radiation,(y,x)=>[...ramp(P.layers.radiation[y][x]*.8),190]);
+return{relief,geo,cost,rad}}
+function setLayer(id,layer){const o=layers[id];if(o.layer&&map.hasLayer(o.layer))map.removeLayer(o.layer);o.layer=layer;if(layer){layer.setOpacity&&layer.setOpacity(o.op);if(o.on)layer.addTo(map)}}
+function addRow(id,label,tag,status,on,op){layers[id]={label,tag,status,on,op,layer:null};const r=document.createElement("div");r.className="lr";
+r.innerHTML=`<input type="checkbox" aria-label="${label}" ${on?"checked":""}><label>${label} <span class="bd ${tag=="real"?"v":"s"}">${tag=="real"?"NASA":"SIM"}</span><small id="st-${id}">${status}</small></label><input type="range" min="0" max="1" step=".05" value="${op}" aria-label="${label} opacity">`;
+const[cb,,sl]=r.children,o=layers[id];cb.onchange=()=>{o.on=cb.checked;if(o.layer)cb.checked?o.layer.addTo(map):map.removeLayer(o.layer)};sl.oninput=()=>{o.op=+sl.value;o.layer&&o.layer.setOpacity&&o.layer.setOpacity(o.op)};$("lrows").appendChild(r)}
+function tiles(){M.tile_layers.forEach(d=>{addRow(d.id,d.label,d.url?"real":"sim",d.status,!!d.visible,d.opacity??1);if(!d.url)return;
+let ok=0,bad=0;const l=L.tileLayer(d.url,{tileSize:256,noWrap:true,maxNativeZoom:d.maxNativeZoom,maxZoom:16,bounds:d.bounds,attribution:"NASA/JPL/USGS Mars Trek"});
+l.on("tileload",()=>{ok++});l.on("tileerror",()=>{bad++;if(bad>=6&&!ok)$("st-"+d.id).textContent="tiles not loading: check internet, or confirm the URL in the Network tab"});setLayer(d.id,l)});
+[["relief","Simulated terrain relief (topography proxy)",0],["geo","Simulated geologic units (SIM 3292 proxy)",0],["cost","Hazard cost grid (slope above 15° blocked)",1],["rad","Radiation proxy",0]].forEach(([id,l,on])=>addRow(id,l,"sim","from backend cost pipeline",!!on,on?.5:.6));
+addRow("sites",t("sites"),"real","NSSDCA coordinates and team data",true,1)}
+function sitesLayer(){sitesGroup=L.layerGroup();M.historical_ground_truth_sites.forEach(s=>L.circleMarker([s.lat,s.lon],{radius:6,color:"#fff",weight:2,fillColor:"#e8c35f",fillOpacity:1}).bindPopup(`<b>${s.name}</b><br>NSSDCA ${s.nssdca_id}<br>${s.hazard_note}`).addTo(sitesGroup));
+M.candidate_eva_locations.forEach(s=>L.circleMarker([s.lat,s.lon],{radius:5,color:"#fff",weight:1,fillColor:"#7fd48a",fillOpacity:.9}).bindPopup(`<b>${s.name}</b><br>Candidate EVA site<br>Mapping potential: ${s.mapping_potential}<br>Difficulty: ${s.difficulty}`).addTo(sitesGroup));
+setLayer("sites",sitesGroup)}
+function route(){return(hz&&P.routes.reroute)||P.routes.nominal}
+function draw(){routeGroup.clearLayers();wpGroup.clearLayers();if(hzCircle){map.removeLayer(hzCircle);hzCircle=null}
+const n=P.routes.nominal,r=P.routes.reroute;
+if(hz&&r){L.polyline(n.path_latlon,{color:"#ffd27f",weight:3,dashArray:"6 6"}).addTo(routeGroup);L.polyline(r.path_latlon,{color:"#5fe0e8",weight:4}).addTo(routeGroup);}else L.polyline(n.path_latlon,{color:"#5fe0e8",weight:4}).addTo(routeGroup);
+if(hz){hzCircle=L.circle([P.hazard.lat,P.hazard.lon],{radius:P.hazard.radius_m,color:"#ff5a4d",fillColor:"#ff3b2e",fillOpacity:.35,dashArray:"6 4"}).bindTooltip(P.hazard.label).addTo(map)}
+P.waypoints.forEach((w,i)=>{const ll=P.routes.nominal.path_latlon;L.marker(rcLL(w),{icon:L.divIcon({className:"",html:`<div class="wp ${i==sel?"sel":""}">${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]}),title:w.name}).on("click",()=>{sel=i;draw();inspect()}).addTo(wpGroup)})}
+function rcLL(w){const g=P.grid.bounds,R=P.grid.rows,C=P.grid.cols;return[g[1][0]-(w.row+.5)/R*(g[1][0]-g[0][0]),g[0][1]+(w.col+.5)/C*(g[1][1]-g[0][1])]}
+function metrics(){const r=route(),n=P.routes.nominal;$("hz").textContent=hz?t("reset"):t("hazard");$("hz").className=hz?"on":"";
+const d=r.distance_m-n.distance_m;
+$("mt").innerHTML=[[(r.distance_m/1000).toFixed(2)+" km",t("dist")],[r.time_min+" min",t("time")],[r.o2_used_pct+" %",t("o2")],[r.dose_msv+" mSv",t("dose")],[r.max_slope_deg+"°",t("slope")],[r.worst_walkback_margin_pct+" %"+(r.worst_walkback_margin_pct<0?" ✖":""),t("wb")]].map(a=>`<div><b>${a[0]}</b><span>${a[1]}</span></div>`).join("")+(hz&&P.routes.reroute?`<div style="grid-column:1/3;color:var(--cy)">${t("rr")}: ${d>=0?"+":""}${d} m</div>`:"");
+$("msg").textContent=hz&&!P.routes.reroute?t("nopath"):"";
+const g=$("prof").getContext("2d"),el=r.profile_m,lo=Math.min(...el),hi=Math.max(...el,lo+1);g.clearRect(0,0,360,90);
+r.wp_stats.forEach(s=>{g.fillStyle="#ff8a4c66";g.fillRect(s.dist_m/r.distance_m*354+2,0,2,90)});
+g.beginPath();el.forEach((v,i)=>{const X=i/(el.length-1)*354+3,Y=78-(v-lo)/(hi-lo)*58;i?g.lineTo(X,Y):g.moveTo(X,Y)});g.strokeStyle="#5fe0e8";g.lineWidth=2;g.stroke();
+g.fillStyle="#a3917f";g.font="10px sans-serif";g.fillText(hi.toFixed(0)+" m",4,10);g.fillText(lo.toFixed(0)+" m · simulated elevation along route",4,88)}
+function inspect(){const w=P.waypoints[sel],s=route().wp_stats[sel];
+$("wl").innerHTML=P.waypoints.map((x,i)=>`<button class="${i==sel?"on":""}" onclick="sel=${i};draw();inspect()">${i+1}. ${x.name}</button>`).join("");
+$("wd").innerHTML=`<p style="margin:6px 0"><b>${w.name}</b></p><p style="margin:4px 0">${t("obj")}: ${w.science_task}</p>
+<p style="margin:4px 0"><span class="bd v">team data</span> ${w.safety_status} · slope ${w.slope_deg}° · O₂ ${w.suit_o2_pct}%</p>
+<p style="margin:4px 0"><span class="bd s">simulated</span> slope ${w.sim_slope_deg}° · radiation ${w.sim_radiation_msv_day} mSv/day · O₂ left ${s.o2_left_pct}% · walk-back margin ${s.walkback_margin_pct}%${s.walkback_margin_pct<0?" ✖":""} · ${(s.dist_m/1000).toFixed(2)} km from start</p>
+<p class="sm" style="margin:4px 0">${w.lat}°, ${w.lon}°${w.snapped_cells?` · moved ${w.snapped_cells} cells to reach passable ground`:""}</p>
+<p class="sm" style="margin:4px 0">POV reference: <a href="https://photojournal.jpl.nasa.gov/catalog/${w.pov_ref}" target="_blank" rel="noopener">${w.pov_ref}</a> (from team citations, image content not verified)</p>`}
+function env(){const e=mis.environmental_status,lv=e.alert.startsWith("GREEN")?"v":e.alert.startsWith("RED")?"":"s";
+$("env").innerHTML=`<p style="margin:0 0 8px"><span class="bd ${lv}" style="${lv==""?"color:var(--bad);border-color:var(--bad)":""}">${e.alert}</span></p>
+<div class="mt" style="margin-top:0"><div><b>${e.temp_c} °C</b><span>temperature range</span></div><div><b>${e.pressure_pa} Pa</b><span>surface pressure</span></div><div><b>${e.radiation_msv_day} mSv/day</b><span>radiation baseline</span></div><div><b>τ ${e.dust_tau}</b><span>dust opacity</span></div></div>`+(mis.coordinate_warning?`<p class="sm" style="color:var(--sim)">⚠ ${mis.coordinate_warning}</p>`:"")+`<p class="sm">${mis.usgs_geologic_unit}</p>`}
+async function load(id){$("msg").textContent="…";let r;try{r=await fetch(`${API}/api/plan/${id}`);if(!r.ok)throw new Error((await r.json()).detail)}catch(e){showErr("Planner error: "+e.message);return}
+P=await r.json();mis=M.eva_missions.find(m=>m.mission_id==id);hz=false;sel=0;const o=overlays(P),b=P.grid.bounds;
+["relief","geo","cost","rad"].forEach(k=>setLayer(k,L.imageOverlay(o[k],b,{opacity:layers[k].op})));
+$("mTitle").textContent=mis.title;$("mObj").textContent=mis.objective;map.fitBounds(b,{padding:[20,20]});draw();metrics();inspect();env()}
+function showErr(m){$("err").hidden=false;$("err").innerHTML=m}
+function lang(){document.querySelectorAll("[data-i]").forEach(e=>e.textContent=t(e.dataset.i));$("lang").textContent=LG=="en"?"தமிழ்":"English";document.documentElement.lang=LG=="en"?"en":"ta";if(P){metrics();inspect()}else $("hz").textContent=t("hazard")}
+async function init(){lang();
+try{M=await(await fetch(API+"/api/missions")).json();$("api").textContent="API connected";$("api").className="bd v"}
+catch(e){$("api").textContent="API offline";$("api").className="bd";showErr("The planner API is not reachable. In a terminal run <code>cd backend</code> then <code>uvicorn server:app --port 8000</code> and open <code>http://localhost:8000</code>.");return}
+map=L.map("map",{crs:L.CRS.EPSG4326,minZoom:0,maxZoom:16,maxBounds:[[-95,-185],[95,185]]}).setView([0,0],1);routeGroup=L.layerGroup().addTo(map);wpGroup=L.layerGroup().addTo(map);
+tiles();sitesLayer();
+$("site").innerHTML=M.eva_missions.map(m=>`<option value="${m.mission_id}">${m.title}</option>`).join("");
+$("site").onchange=e=>load(e.target.value);$("hz").onclick=()=>{hz=!hz;draw();metrics();inspect()};
+$("fit").onclick=()=>P&&map.fitBounds(P.grid.bounds,{padding:[20,20]});$("whole").onclick=()=>map.setView([0,0],1);
+$("lang").onclick=()=>{LG=LG=="en"?"ta":"en";lang()};
+await load(M.eva_missions[0].mission_id)}
+init();
+</script></body></html>
